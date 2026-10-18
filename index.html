@@ -9,7 +9,8 @@
 <meta name="theme-color" content="#0e0e10" media="(prefers-color-scheme: dark)">
 <title>Piano</title>
 <!-- Piano from the phone. Source: hub/web/piano/index.html; published copy: github.com/hgzech/piano (GitHub Pages).
-     Reads /piano on the Europe database (hgzech-home); writes only new /piano/cmd records (hub/firebase/database.rules.json). -->
+     Reads /piano on the Europe database (hgzech-home); writes new /piano/cmd records and the shared /piano/playlists
+     (rules: hub/firebase/database.rules.json). -->
 
 <!-- ===================== LOOK (colours, sizes, layout) — change freely, no logic here ===================== -->
 <style>
@@ -17,12 +18,14 @@
     color-scheme: light dark;
     --bg: #ffffff;
     --bar-bg: rgba(248, 248, 250, .94);
+    --sheet-bg: #ffffff;
+    --scrim: rgba(0, 0, 0, .35);
     --text: #111114;
     --text-2: #6b6b72;          /* second line, composer headers */
-    --text-3: #a0a0a8;          /* quiet parts of titles */
+    --text-3: #a0a0a8;          /* quiet parts */
     --sep: rgba(0, 0, 0, .08);
-    --fill: rgba(118, 118, 128, .12);   /* search field, idle buttons */
-    --accent: #2563eb;          /* the one accent: playing song, Stop when live */
+    --fill: rgba(118, 118, 128, .12);   /* search field, idle buttons, tiles */
+    --accent: #2563eb;          /* the one accent: playing song, Play/Stop when live */
     --on-accent: #ffffff;
     --ok: #22a559;
     --bad: #e5484d;
@@ -39,6 +42,8 @@
       color-scheme: dark;
       --bg: #0e0e10;
       --bar-bg: rgba(30, 30, 33, .94);
+      --sheet-bg: #1c1c1f;
+      --scrim: rgba(0, 0, 0, .55);
       --text: #f2f2f4;
       --text-2: #a0a0a8;
       --text-3: #6c6c74;
@@ -58,15 +63,20 @@
   main { max-width: 640px; margin: 0 auto; padding: env(safe-area-inset-top) 0 calc(var(--bar-h) + env(safe-area-inset-bottom) + 24px); }
   button { font: inherit; color: inherit; touch-action: manipulation; }
   [hidden] { display: none !important; }
+  svg.i { width: 22px; height: 22px; fill: currentColor; display: block; }
 
-  /* header + search */
-  header { padding: 18px var(--gutter) 6px; }
+  /* header, Songs / Playlists switch */
+  header { padding: 18px var(--gutter) 2px; }
   h1 { margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -.02em; }
+  .tabs { display: flex; gap: 8px; padding: 10px var(--gutter) 2px; }
+  .tabs button { border: 0; border-radius: 999px; padding: 7px 15px; background: var(--fill); font-size: 15px; font-weight: 600; }
+  .tabs button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+
+  /* search */
   .search { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 8px var(--gutter) 10px;
             height: var(--search-h); box-sizing: border-box; }
   #q { width: 100%; height: 40px; box-sizing: border-box; border: 0; border-radius: 10px; background: var(--fill); color: var(--text);
-       font: 17px var(--font); padding: 0 12px; outline: none; -webkit-appearance: none; appearance: none; }
-  #q { padding: 0 40px 0 36px; }
+       font: 17px var(--font); padding: 0 40px 0 36px; outline: none; -webkit-appearance: none; appearance: none; }
   #q::placeholder { color: var(--text-2); }
   #q::-webkit-search-cancel-button, #q::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
   .field { position: relative; }
@@ -75,28 +85,54 @@
            display: grid; place-items: center; }
   #clear::before { content: ""; width: 18px; height: 18px; border-radius: 50%; background: var(--text-3); }
   #clear::after { content: "×"; position: absolute; color: var(--bg); font: 700 15px/1 var(--font); }
-  #nomatch button { border: 0; background: none; color: var(--accent); padding: 0; font: inherit; }
+  .link { border: 0; background: none; color: var(--accent); padding: 0; font: inherit; }
 
-  /* list */
+  /* lists */
   ul { list-style: none; margin: 0; padding: 0; }
   li.hdr { position: sticky; top: var(--search-h); z-index: 1; background: var(--bg); color: var(--text-2);
            font-size: 13px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
            padding: 18px var(--gutter) 6px; }
-  .row { width: 100%; display: flex; align-items: center; gap: 12px; text-align: left; background: none; border: 0;
+  li.song, li.pl { display: flex; align-items: center; }
+  .row { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; text-align: left; background: none; border: 0;
          padding: var(--row-pad) var(--gutter); }
+  li.song .row { padding-right: 4px; }
   .row:active { background: var(--fill); }
   .txt { flex: 1; min-width: 0; }
   .t { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* one line: all rows same height */
-  .x { color: var(--text-3); }
   .s { display: block; color: var(--text-2); font-size: 14px; margin-top: 1px;
        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   li.current .t { color: var(--accent); font-weight: 600; }
+  li.gone .t { color: var(--text-3); }
   .row .mark { flex: none; width: 18px; height: 18px; display: none; }
   li.current .row .mark.eq { display: flex; }
   li.waiting .row .mark.spin { display: block; }
   li.waiting .row .mark.eq { display: none; }
-  #empty, #nomatch { color: var(--text-2); padding: 24px var(--gutter); margin: 0; }
+  .more { flex: none; width: 44px; height: 44px; margin-right: 6px; border: 0; background: none; color: var(--text-2);
+          display: grid; place-items: center; border-radius: 50%; }
+  .more:active { background: var(--fill); }
+  .note { color: var(--text-2); padding: 24px var(--gutter); margin: 0; }
   #signout { display: block; margin: 28px auto 0; background: none; border: 0; color: var(--text-2); font-size: 15px; padding: 10px; }
+
+  /* playlists: square tiles like covers */
+  .tile { flex: none; width: 52px; height: 52px; border-radius: 6px; background: var(--fill); color: var(--text-2);
+          display: grid; place-items: center; }
+  .tile svg { width: 24px; height: 24px; }
+  #lists { padding-top: 8px; }
+
+  /* one playlist */
+  .plhead { padding: 6px var(--gutter) 10px; }
+  .back { display: flex; align-items: center; gap: 2px; border: 0; background: none; color: var(--accent); padding: 8px 0; margin-left: -6px; font-size: 17px; }
+  .back svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  #plName { margin: 6px 0 2px; font-size: 26px; font-weight: 700; letter-spacing: -.01em; overflow-wrap: anywhere; }
+  #plMeta { margin: 0; color: var(--text-2); font-size: 14px; }
+  .plbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+  .plbar .more { margin: 0 0 0 -10px; }
+  .plbar .grow { flex: 1; }
+  #plPlay { width: 56px; height: 56px; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent);
+            display: grid; place-items: center; }
+  #plPlay svg { width: 26px; height: 26px; }
+  #plPlay:disabled { opacity: .35; }
+  #plPlay:active { transform: scale(.95); }
 
   /* playing / waiting marks */
   .eq { display: flex; align-items: flex-end; gap: 2px; }
@@ -108,7 +144,7 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .eq i, .spin { animation: none; } .eq i { height: 70%; } }
 
-  /* bottom bar: what's playing, status, problems, Stop */
+  /* bottom bar: what's playing, status, problems, Next, Stop */
   #bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; background: var(--bar-bg);
          -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
          border-top: 1px solid var(--sep); padding: 10px var(--gutter) calc(10px + env(safe-area-inset-bottom)); }
@@ -129,6 +165,8 @@
   #sub.warn, #sub.fail { white-space: normal; }   /* problems may take a few lines */
   #sub:empty { display: none; }
   #sub.warn { color: var(--warn); } #sub.fail { color: var(--bad); }
+  #next { flex: none; width: 40px; height: 40px; border: 0; background: none; color: var(--text); display: grid; place-items: center; border-radius: 50%; }
+  #next:active { background: var(--fill); }
   #stop { flex: none; width: 48px; height: 48px; border-radius: 50%; border: 0; background: var(--fill);
           display: grid; place-items: center; position: relative; }
   #stop::before { content: ""; width: 14px; height: 14px; border-radius: 3px; background: var(--text-2); }
@@ -138,6 +176,39 @@
   #stop.waiting::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent;
                          border-top-color: var(--accent); animation: spin .8s linear infinite; }
 
+  /* bottom sheet (actions, add to playlist, name, confirm) */
+  #sheet { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; justify-content: flex-end; }
+  #sheet .scrim { position: absolute; inset: 0; background: var(--scrim); }
+  #sheet .panel { position: relative; background: var(--sheet-bg); border-radius: 14px 14px 0 0; max-height: 80vh; overflow-y: auto;
+                  padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); max-width: 640px; width: 100%; margin: 0 auto;
+                  animation: up .18s ease-out; }
+  @keyframes up { from { transform: translateY(24px); opacity: .6; } }
+  @media (prefers-reduced-motion: reduce) { #sheet .panel { animation: none; } }
+  .grab { width: 36px; height: 5px; border-radius: 3px; background: var(--fill); margin: 0 auto 6px; }
+  .sh-head { padding: 8px var(--gutter) 12px; border-bottom: 1px solid var(--sep); }
+  .sh-head .t { font-weight: 600; }
+  .sh-item { width: 100%; display: flex; align-items: center; gap: 14px; text-align: left; border: 0; background: none;
+             padding: 14px var(--gutter); font-size: 17px; }
+  .sh-item:active { background: var(--fill); }
+  .sh-item svg { width: 22px; height: 22px; flex: none; color: var(--text-2); fill: currentColor; }
+  .sh-item.danger { color: var(--bad); }
+  .sh-item .s { font-size: 13px; }
+  .sh-form { padding: 14px var(--gutter) 6px; display: grid; gap: 14px; }
+  .sh-form h2 { margin: 0; font-size: 20px; text-align: center; }
+  .sh-form p { margin: -6px 0 0; color: var(--text-2); text-align: center; font-size: 15px; }
+  .sh-form input { height: 46px; border: 0; border-radius: 10px; background: var(--fill); color: var(--text); padding: 0 12px;
+                   font: 17px var(--font); outline: none; -webkit-user-select: text; user-select: text; }
+  .sh-btns { display: flex; gap: 10px; }
+  .sh-btns button { flex: 1; height: 46px; border: 0; border-radius: 12px; background: var(--fill); font-weight: 600; }
+  .sh-btns .primary { background: var(--accent); color: var(--on-accent); }
+  .sh-btns .primary.danger { background: var(--bad); color: #fff; }
+  .sh-btns button:disabled { opacity: .4; }
+
+  /* toast: short confirmation above the bar */
+  #toast { position: fixed; left: 50%; transform: translateX(-50%); z-index: 11; max-width: calc(100% - 48px);
+           bottom: calc(var(--bar-h) + env(safe-area-inset-bottom) + 14px); background: var(--text); color: var(--bg);
+           border-radius: 10px; padding: 10px 16px; font-size: 15px; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,.2); }
+
   /* sign-in */
   #signin-box { min-height: 70vh; display: grid; place-content: center; gap: 18px; text-align: center; padding: 0 var(--gutter); }
   #signin-box p { margin: 0; color: var(--text-2); }
@@ -145,6 +216,21 @@
 </style>
 </head>
 <body>
+<!-- icons -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M5 6.2v11.6a1 1 0 0 0 1.55.83L15 13v4.8a1 1 0 0 0 2 0V6.2a1 1 0 0 0-2 0V11L6.55 5.37A1 1 0 0 0 5 6.2z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M10 4.5V15a3.5 3.5 0 1 0 2 3.15V9l7-1.6V13a3.5 3.5 0 1 0 2 3.15V3.2a.7.7 0 0 0-.85-.68l-9.6 2.2a.7.7 0 0 0-.55.78z"/></symbol>
+  <symbol id="i-add" viewBox="0 0 24 24"><path d="M3 6h12v2H3zm0 5h12v2H3zm0 5h8v2H3zm14-3h-0v-3h2v3h3v2h-3v3h-2v-3h-3v-2z"/></symbol>
+  <symbol id="i-remove" viewBox="0 0 24 24"><path d="M5 11h14v2H5z"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 5l7 7-1.4 1.4L13 8.8V19h-2V8.8l-4.6 4.6L5 12z"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 19l-7-7 1.4-1.4 4.6 4.6V5h2v10.2l4.6-4.6L19 12z"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 17.2V20h2.8l9.9-9.9-2.8-2.8zm15.7-9.5a1 1 0 0 0 0-1.4l-1.9-1.9a1 1 0 0 0-1.4 0l-1.5 1.5 2.8 2.8z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4zm-3 6h12l-1 12H7z"/></symbol>
+</svg>
 <main>
   <header><h1>Piano</h1></header>
   <div id="signin-box" hidden>
@@ -152,15 +238,42 @@
     <button id="signin">Sign in with Google</button>
   </div>
   <div id="app" hidden>
-    <div class="search"><div class="field">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20 20" stroke-linecap="round"/></svg>
-      <input id="q" type="search" placeholder="Search songs, composers, pianists" aria-label="Search"
-         autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
-      <button id="clear" type="button" aria-label="Clear search" hidden></button>
-    </div></div>
-    <p id="empty" hidden>No songs on the hub yet.</p>
-    <p id="nomatch" hidden>No matches. <button id="clear2" type="button">Clear search</button></p>
-    <ul id="songs"></ul>
+    <nav class="tabs" id="tabs">
+      <button data-v="songs" aria-pressed="true">Songs</button>
+      <button data-v="lists" aria-pressed="false">Playlists</button>
+    </nav>
+
+    <section id="v-songs">
+      <div class="search"><div class="field">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20 20" stroke-linecap="round"/></svg>
+        <input id="q" type="search" placeholder="Search songs, composers, pianists" aria-label="Search"
+           autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+        <button id="clear" type="button" aria-label="Clear search" hidden></button>
+      </div></div>
+      <p id="empty" class="note" hidden>No songs on the hub yet.</p>
+      <p id="nomatch" class="note" hidden>No matches. <button id="clear2" class="link" type="button">Clear search</button></p>
+      <ul id="songs"></ul>
+    </section>
+
+    <section id="v-lists" hidden>
+      <ul id="lists"></ul>
+    </section>
+
+    <section id="v-list" hidden>
+      <div class="plhead">
+        <button class="back" id="back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>Playlists</button>
+        <h2 id="plName"></h2>
+        <p id="plMeta"></p>
+        <div class="plbar">
+          <button class="more" id="plMore" aria-label="Playlist options"><svg class="i"><use href="#i-more"/></svg></button>
+          <span class="grow"></span>
+          <button id="plPlay" aria-label="Play"><svg class="i"><use href="#i-play"/></svg></button>
+        </div>
+      </div>
+      <p id="plEmpty" class="note" hidden>This playlist is empty. In Songs, tap ••• next to a song and choose Add to playlist.</p>
+      <ul id="plSongs"></ul>
+    </section>
+
     <button id="signout">Sign out</button>
   </div>
 </main>
@@ -169,16 +282,19 @@
   <div class="in">
     <div id="barMark"><span id="dot"></span></div>
     <div id="barTxt"><div id="lineRow"><span id="line">…</span><span id="time"></span></div><div id="sub"></div></div>
+    <button id="next" aria-label="Next song" hidden><svg class="i"><use href="#i-next"/></svg></button>
     <button id="stop" aria-label="Stop"></button>
   </div>
 </div>
+<div id="sheet" hidden><div class="scrim"></div><div class="panel" role="dialog" aria-modal="true"><div class="grab"></div><div id="sheetBody"></div></div></div>
+<div id="toast" role="status" hidden></div>
 
 <!-- ===================== LOGIC ===================== -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
   from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
-import { getDatabase, ref, push, onValue, serverTimestamp }
+import { getDatabase, ref, push, set, remove, onValue, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
 // Same Firebase project and web config as the plug page (not secret; access is enforced by the database rules).
@@ -200,15 +316,18 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app, DB_URL);
 const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const icon = (name) => `<svg class="i"><use href="#i-${name}"/></svg>`;
 
-let state = null, heartbeat = null, songs = {}, offset = 0, unsubs = [];
+let state = null, heartbeat = null, songs = {}, playlists = {}, offset = 0, unsubs = [];
 let connected = null, everConnected = false;   // Firebase connection of THIS phone (.info/connected)
 let denied = false;                            // signed-in account isn't allowed by the rules
-// This phone's latest tap { id, action, song, cts, rec }. Only its outcome is shown; older taps are ignored.
+// This phone's latest tap { id, action, song, list, cts, rec }. Only its outcome is shown; older taps are ignored.
 let tap = null, tapUnsub = null;
+let view = "songs", openPl = null;             // songs | lists | list (one playlist: openPl)
 
 // ---- display helpers (presentation only; the data in Firebase is not changed) ----
-// Title split into the main part and a quieter extra part (movement after ":", or a trailing "(collection)").
+// Title without the work/movement part (after ":" or a trailing "(...)"); that comes back once the hub sends it as fields.
 function splitTitle(raw) {
   let t = (raw || "").replace(/,\s*(No\.|Nr\.)/g, " $1").replace(/--/g, "–").replace(/\s+=\s*(?=\()/, " ").trim();
   let m = t.match(/^(.+?)\s*:\s+(.+)$/);
@@ -220,11 +339,22 @@ function splitTitle(raw) {
 const titleOf = (id) => (songs[id] && songs[id].title) || id || "";
 const shortTitle = (id) => splitTitle(titleOf(id))[0] || id || "";
 const quoted = (id) => `“${shortTitle(id)}”`;
-const fold = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ß/g, "ss").replace(/ø/g, "o")
+const fold = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ß/g, "ss").replace(/ø/g, "o")
   .replace(/ł/g, "l").replace(/æ/g, "ae").toLowerCase();
 const surname = (c) => (c || "").replace(/\(.*?\)/g, "").trim().split(/\s+/).pop() || "";
-
 const mmss = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+const coll = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+// Firebase returns stored arrays as arrays, or as {"0":..,"1":..} objects; always work with a plain array
+const asList = (v) => Array.isArray(v) ? v.filter(x => x != null) : v ? Object.keys(v).sort((a, b) => a - b).map(k => v[k]) : [];
+const plSongs = (pid) => asList(playlists[pid] && playlists[pid].songs);
+const nSongs = (n) => `${n} song${n === 1 ? "" : "s"}`;
+function totalTime(ids) {
+  const s = ids.reduce((a, id) => a + ((songs[id] && songs[id].len) || 0), 0);
+  if (!s) return "";
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  return h ? `${h} h ${m} min` : `${Math.max(1, m)} min`;
+}
+
 const hubUp = () => heartbeat != null && Date.now() + offset - heartbeat < HUB_STALE_MS;
 const phoneOffline = () => connected === false && everConnected;
 const answered = () => !!(tap && tap.rec && tap.rec.result);
@@ -254,6 +384,14 @@ function setBarMark(kind, dotClass) {             // kind: dot | eq | spin
   if (kind === "dot") $("dot").className = dotClass;
 }
 
+// The playlist being played, as far as this phone knows: the hub's state, or this phone's tap while it's on its way.
+function activeList() {
+  const s = state || {};
+  if (pending() && tap.action === "play") return tap.list || null;
+  if (pending() && tap.action === "stop") return null;
+  return (s.status === "playing" || s.status === "loading") && s.list ? { ...s.list, songs: asList(s.list.songs) } : null;
+}
+
 function render() {
   let dot = "", line = "…", warn = "", mark = "dot";
   const s = state || {};
@@ -278,7 +416,11 @@ function render() {
   } else {
     dot = "on";
     if (s.status === "playing") { current = s.song; }
-    else if (s.status === "loading") { line = "Loading…"; mark = "spin"; }
+    else if (s.status === "loading") {
+      line = "Loading…"; mark = "spin";
+      const l = s.list && asList(s.list.songs);
+      if (l && l[s.list.pos]) { current = l[s.list.pos]; starting = true; }    // playlist moving to its next song
+    }
     else if (s.status === "error") { dot = "off"; line = "Piano problem"; warn = s.error ? `${s.error[0].toUpperCase()}${s.error.slice(1)}.` : ""; }
     else line = "Ready";
     if (busy) {                                          // optimistic: show what the tap is doing
@@ -287,11 +429,13 @@ function render() {
     }
   }
   const f = tapFailure();
+  const al = current ? activeList() : null;
   let sub = warn, subClass = warn ? "warn" : "";
   if (current) {
     const so = songs[current] || {};
     line = shortTitle(current);
-    sub = starting ? "Starting…" : [so.composer, so.performer].filter(Boolean).join(" · ");
+    sub = starting ? "Starting…" : al ? `${al.name} · ${al.pos + 1} of ${al.songs.length}`
+                                      : [so.composer, so.performer].filter(Boolean).join(" · ");
     subClass = ""; mark = starting ? "spin" : "eq";
   }
   if (f && !denied) { sub = f; subClass = "fail"; }
@@ -300,8 +444,8 @@ function render() {
   const len = current && songs[current] && songs[current].len;
   if (current && len && !starting) {
     if (s.status === "playing" && s.song === current && s.since) {
-      const el = Math.min(len, Math.max(0, (Date.now() + offset - s.since) / 1000));
-      time = `${mmss(el)} / ${mmss(len)}`; frac = el / len;
+      const e = Math.min(len, Math.max(0, (Date.now() + offset - s.since) / 1000));
+      time = `${mmss(e)} / ${mmss(len)}`; frac = e / len;
     } else time = mmss(len);
   }
   $("time").textContent = time;
@@ -311,18 +455,41 @@ function render() {
   $("line").textContent = line;
   $("sub").textContent = sub;
   $("sub").className = subClass;
+  $("next").hidden = !(al && al.pos + 1 < al.songs.length && hubUp());
   $("stop").classList.toggle("live", !denied && hubUp() && (s.status === "playing" || s.status === "loading" || (busy && tap.action === "play")));
   $("stop").classList.toggle("waiting", ring && tap.action === "stop");
-  for (const li of $("songs").querySelectorAll("li.song")) {
-    li.classList.toggle("current", li.dataset.id === current);
-    li.classList.toggle("waiting", ring && tap.action === "play" && tap.song === li.dataset.id);
+  // marks in the lists: in a playlist, mark the exact position when that playlist is the one playing
+  const inThis = al && openPl && al.id === openPl;
+  for (const li of document.querySelectorAll("li.song")) {
+    const here = li.dataset.idx != null && inThis ? +li.dataset.idx === al.pos : li.dataset.id === current;
+    li.classList.toggle("current", !!current && here);
+    li.classList.toggle("waiting", ring && tap.action === "play" && here && tap.song === li.dataset.id);
   }
+  if (view === "list" && openPl) renderPlButton(al);
 }
 setInterval(render, 1000);
 
+// ---- song rows (used in Songs and in a playlist) ----
+function songRow(id, onTap, onMore, idx) {
+  const s = songs[id];
+  const li = el("li", "song" + (s ? "" : " gone")); li.dataset.id = id;
+  if (idx != null) li.dataset.idx = idx;
+  const b = el("button", "row");
+  const txt = el("span", "txt");
+  txt.append(el("span", "t", s ? splitTitle(s.title || id)[0] : "Song no longer on the hub"));
+  const sub = s ? (idx != null ? [s.composer, s.performer] : [s.performer]).filter(Boolean).join(" · ") : id;
+  if (sub) txt.append(el("span", "s", sub));
+  b.append(txt);
+  b.insertAdjacentHTML("beforeend", '<span class="mark eq"><i></i><i></i><i></i></span><span class="mark spin"></span>');
+  b.onclick = onTap;
+  const m = el("button", "more"); m.innerHTML = icon("more"); m.setAttribute("aria-label", "More options");
+  m.onclick = (e) => { e.stopPropagation(); onMore(); };
+  li.append(b, m);
+  return li;
+}
+
 // List grouped by composer (sorted by surname), titles sorted within each composer; songs without composer last.
 function renderSongs() {
-  const coll = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
   const ids = Object.keys(songs);
   const groups = new Map();
   for (const id of ids) {
@@ -335,28 +502,19 @@ function renderSongs() {
   const ul = $("songs");
   ul.replaceChildren();
   for (const c of names) {
-    const h = document.createElement("li"); h.className = "hdr"; h.textContent = c || "Other";
-    ul.append(h);
+    ul.append(el("li", "hdr", c || "Other"));
     const list = groups.get(c).sort((a, b) => coll.compare(titleOf(a), titleOf(b)) || coll.compare(a, b));
     for (const id of list) {
       const s = songs[id] || {};
-      const li = document.createElement("li"); li.className = "song"; li.dataset.id = id;
+      const li = songRow(id, () => send("play", id), () => songSheet(id));
       li.dataset.q = fold([s.title, s.composer, s.performer, id].join(" "));
-      const b = document.createElement("button"); b.className = "row";
-      const txt = document.createElement("span"); txt.className = "txt";
-      const t = document.createElement("span"); t.className = "t";
-      const [main] = splitTitle(s.title || id);   // work/movement part left out until the hub sends them as fields
-      t.textContent = main;
-      txt.append(t);
-      if (s.performer) { const e = document.createElement("span"); e.className = "s"; e.textContent = s.performer; txt.append(e); }
-      b.append(txt);
-      b.insertAdjacentHTML("beforeend", '<span class="mark eq"><i></i><i></i><i></i></span><span class="mark spin"></span>');
-      b.onclick = () => send("play", id);
-      li.append(b); ul.append(li);
+      ul.append(li);
     }
   }
   $("empty").hidden = ids.length > 0;
   filter();
+  renderLists();
+  if (view === "list") renderPlaylist();
   render();
 }
 
@@ -382,7 +540,7 @@ function clearSearch(keepFocus) {
 }
 $("q").addEventListener("input", () => {
   filter();
-  const top = $("app").offsetTop;                       // keep the search bar pinned, results from the top
+  const top = $("v-songs").offsetTop;                   // keep the search bar pinned, results from the top
   if (window.scrollY > top) window.scrollTo(0, top);
 });
 $("q").addEventListener("keydown", e => {
@@ -394,14 +552,194 @@ $("clear").onclick = () => clearSearch(true);
 $("clear2").onclick = () => clearSearch(false);
 $("songs").addEventListener("touchstart", () => { if (document.activeElement === $("q")) $("q").blur(); }, { passive: true });
 
-function send(action, song) {
+// ---- views: Songs, Playlists, one playlist (the phone's back gesture leaves a playlist) ----
+function show(v, pid) {
+  view = v; openPl = v === "list" ? pid : null;
+  $("v-songs").hidden = v !== "songs"; $("v-lists").hidden = v !== "lists"; $("v-list").hidden = v !== "list";
+  $("tabs").hidden = v === "list";
+  for (const b of $("tabs").children) b.setAttribute("aria-pressed", String(b.dataset.v === (v === "list" ? "lists" : v)));
+  if (v === "list") renderPlaylist();
+  try { localStorage.setItem("piano.tab", v === "songs" ? "songs" : "lists"); } catch (e) {}
+  render();
+}
+for (const b of $("tabs").children) b.onclick = () => { if (view !== b.dataset.v) { show(b.dataset.v); window.scrollTo(0, 0); } };
+function openPlaylist(pid) { history.pushState({ pl: pid }, ""); show("list", pid); window.scrollTo(0, 0); }
+$("back").onclick = () => history.state && history.state.pl ? history.back() : show("lists");
+window.addEventListener("popstate", (e) => {
+  closeSheet();
+  if (e.state && e.state.pl && playlists[e.state.pl]) show("list", e.state.pl); else if (view === "list") show("lists");
+});
+
+// ---- Playlists tab: newest changes first, like Spotify's "Recents" ----
+function renderLists() {
+  const ul = $("lists");
+  ul.replaceChildren();
+  const add = el("li", "pl"); const ab = el("button", "row");
+  ab.innerHTML = `<span class="tile">${icon("plus")}</span>`;
+  const at = el("span", "txt"); at.append(el("span", "t", "New playlist")); ab.append(at);
+  ab.onclick = () => nameSheet("New playlist", "", "Create", (name) => { const pid = createPlaylist(name, []); if (pid) openPlaylist(pid); });
+  add.append(ab); ul.append(add);
+  const ids = Object.keys(playlists).sort((a, b) => (playlists[b].updated || 0) - (playlists[a].updated || 0) ||
+                                                    coll.compare(playlists[a].name || "", playlists[b].name || ""));
+  for (const pid of ids) {
+    const p = playlists[pid], n = plSongs(pid).length;
+    const li = el("li", "pl"); const b = el("button", "row");
+    b.innerHTML = `<span class="tile">${icon("note")}</span>`;
+    const txt = el("span", "txt"); txt.append(el("span", "t", p.name || "Playlist"), el("span", "s", `Playlist · ${nSongs(n)}`));
+    b.append(txt);
+    b.onclick = () => openPlaylist(pid);
+    li.append(b); ul.append(li);
+  }
+}
+
+// ---- one playlist ----
+function renderPlaylist() {
+  const p = playlists[openPl];
+  if (!p) { show("lists"); return; }
+  const ids = plSongs(openPl);
+  $("plName").textContent = p.name || "Playlist";
+  $("plMeta").textContent = [nSongs(ids.length), totalTime(ids)].filter(Boolean).join(" · ");
+  $("plEmpty").hidden = ids.length > 0;
+  const ul = $("plSongs");
+  ul.replaceChildren(...ids.map((id, i) => songRow(id, () => playList(openPl, i), () => songSheet(id, { pid: openPl, i }), i)));
+  renderPlButton(activeList());
+}
+function renderPlButton(al) {
+  const playingThis = !!(al && al.id === openPl);
+  $("plPlay").innerHTML = icon(playingThis ? "stop" : "play");
+  $("plPlay").setAttribute("aria-label", playingThis ? "Stop" : "Play");
+  $("plPlay").disabled = !playingThis && plSongs(openPl).length === 0;
+}
+$("plPlay").onclick = () => { const al = activeList(); if (al && al.id === openPl) send("stop"); else playList(openPl, 0); };
+$("plMore").onclick = () => playlistSheet(openPl);
+
+function playList(pid, pos) {
+  const p = playlists[pid], ids = plSongs(pid);
+  if (!p || !ids[pos]) return;
+  send("play", ids[pos], { id: pid, name: p.name || "Playlist", songs: ids, pos });
+}
+$("next").onclick = () => {
+  const al = activeList();
+  if (al && al.pos + 1 < al.songs.length) send("play", al.songs[al.pos + 1], { ...al, pos: al.pos + 1 });
+};
+
+// ---- saving playlists (shared; whoever changes one last is stored as "by") ----
+function savePlaylist(pid, name, ids, done) {
+  const rec = { name, by: auth.currentUser.uid, updated: serverTimestamp() };
+  if (ids.length) rec.songs = ids;
+  playlists[pid] = { ...rec, updated: Date.now() + offset };     // show the change right away
+  renderLists(); if (view === "list") renderPlaylist();
+  set(ref(db, "piano/playlists/" + pid), rec).then(() => done && toast(done))
+    .catch(e => toast(`Couldn't save: ${e.code || e.message}`));
+}
+function createPlaylist(name, ids, done) {
+  const pid = push(ref(db, "piano/playlists")).key;
+  savePlaylist(pid, name, ids, done);
+  return pid;
+}
+function addTo(pid, id) {
+  const p = playlists[pid], ids = plSongs(pid);
+  if (ids.includes(id)) return toast(`Already in ${p.name}`);
+  savePlaylist(pid, p.name, [...ids, id], `Added to ${p.name}`);
+}
+
+// ---- bottom sheets ----
+function openSheet(nodes) {
+  $("sheetBody").replaceChildren(...nodes);
+  $("sheet").hidden = false;
+}
+function closeSheet() { $("sheet").hidden = true; $("sheetBody").replaceChildren(); }
+$("sheet").querySelector(".scrim").onclick = closeSheet;
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("sheet").hidden) closeSheet(); });
+function item(ic, label, fn, cls, sub) {
+  const b = el("button", "sh-item" + (cls ? " " + cls : ""));
+  b.innerHTML = icon(ic);
+  const t = el("span", "txt"); t.append(el("span", "t", label)); if (sub) t.append(el("span", "s", sub));
+  b.append(t);
+  b.onclick = () => { closeSheet(); fn(); };
+  return b;
+}
+function head(title, sub) {
+  const h = el("div", "sh-head"); h.append(el("span", "t", title)); if (sub) h.append(el("span", "s", sub)); return h;
+}
+function songSheet(id, ctx) {
+  const s = songs[id] || {};
+  const nodes = [head(s.title ? splitTitle(s.title)[0] : id, [s.composer, s.performer].filter(Boolean).join(" · ")),
+                 item("add", "Add to playlist", () => addSheet(id))];
+  if (ctx) {
+    const ids = plSongs(ctx.pid), p = playlists[ctx.pid];
+    const move = (to) => { const a = [...ids]; a.splice(to, 0, a.splice(ctx.i, 1)[0]); savePlaylist(ctx.pid, p.name, a); };
+    if (ctx.i > 0) nodes.push(item("up", "Move up", () => move(ctx.i - 1)));
+    if (ctx.i < ids.length - 1) nodes.push(item("down", "Move down", () => move(ctx.i + 1)));
+    nodes.push(item("remove", "Remove from this playlist", () => {
+      savePlaylist(ctx.pid, p.name, ids.filter((_, j) => j !== ctx.i), `Removed from ${p.name}`);
+    }));
+  }
+  openSheet(nodes);
+}
+function addSheet(id) {
+  const nodes = [head("Add to playlist"),
+                 item("plus", "New playlist", () => nameSheet("New playlist", "", "Create", (name) => createPlaylist(name, [id], `Added to ${name}`)))];
+  const pids = Object.keys(playlists).sort((a, b) => (playlists[b].updated || 0) - (playlists[a].updated || 0));
+  for (const pid of pids) {
+    const has = plSongs(pid).includes(id);
+    nodes.push(item("note", playlists[pid].name, () => addTo(pid, id), "", has ? "Already added" : nSongs(plSongs(pid).length)));
+  }
+  openSheet(nodes);
+}
+function playlistSheet(pid) {
+  const p = playlists[pid];
+  if (!p) return;
+  openSheet([head(p.name, nSongs(plSongs(pid).length)),
+    item("edit", "Rename", () => nameSheet("Rename playlist", p.name, "Save", (name) => savePlaylist(pid, name, plSongs(pid)))),
+    item("trash", "Delete playlist", () => confirmSheet(`Delete “${p.name}”?`, "It's removed for both of you.", "Delete", () => {
+      if (history.state && history.state.pl === pid) history.back(); else show("lists");
+      delete playlists[pid]; renderLists();
+      remove(ref(db, "piano/playlists/" + pid)).then(() => toast(`Deleted ${p.name}`))
+        .catch(e => toast(`Couldn't delete: ${e.code || e.message}`));
+    }), "danger")]);
+}
+function nameSheet(title, value, okLabel, onOk) {
+  const f = el("form", "sh-form");
+  f.append(el("h2", null, title));
+  const inp = el("input"); inp.id = "plNameInput"; inp.value = value; inp.maxLength = 80; inp.placeholder = "Playlist name";
+  inp.setAttribute("enterkeyhint", "done"); inp.setAttribute("autocomplete", "off");
+  const btns = el("div", "sh-btns");
+  const cancel = el("button", null, "Cancel"); cancel.type = "button"; cancel.onclick = closeSheet;
+  const ok = el("button", "primary", okLabel); ok.type = "submit";
+  const check = () => { ok.disabled = !inp.value.trim(); };
+  inp.oninput = check; check();
+  btns.append(cancel, ok);
+  f.append(inp, btns);
+  f.onsubmit = (e) => { e.preventDefault(); const v = inp.value.trim(); if (!v) return; closeSheet(); onOk(v); };
+  openSheet([f]);
+  setTimeout(() => { inp.focus(); inp.select(); }, 50);
+}
+function confirmSheet(title, text, okLabel, onOk) {
+  const f = el("div", "sh-form");
+  f.append(el("h2", null, title), el("p", null, text));
+  const btns = el("div", "sh-btns");
+  const cancel = el("button", null, "Cancel"); cancel.onclick = closeSheet;
+  const ok = el("button", "primary danger", okLabel); ok.onclick = () => { closeSheet(); onOk(); };
+  btns.append(cancel, ok); f.append(btns);
+  openSheet([f]);
+}
+let toastT = null;
+function toast(msg) {
+  $("toast").textContent = msg; $("toast").hidden = false;
+  clearTimeout(toastT); toastT = setTimeout(() => { $("toast").hidden = true; }, 2200);
+}
+
+// ---- commands ----
+function send(action, song, list) {
   const u = auth.currentUser;
   if (!u || denied) return;
   const cts = Date.now();
   const rec = { action, by: u.uid, tap: Math.round(cts + offset), ts: serverTimestamp() };
   if (action === "play") rec.song = song;
+  if (list) rec.list = { id: list.id, name: list.name, songs: list.songs, pos: list.pos };
   const r = push(ref(db, "piano/cmd"), rec);   // queued by the SDK if offline; the hub rejects it if it arrives > 10 s late
-  const t = { id: r.key, action, song, cts, rec: null };
+  const t = { id: r.key, action, song, list: rec.list || null, cts, rec: null };
   if (tapUnsub) tapUnsub();
   tap = t;
   tapUnsub = onValue(ref(db, "piano/cmd/" + t.id), x => { if (x.val()) { t.rec = x.val(); render(); } }, () => {});
@@ -422,10 +760,14 @@ onValue(ref(db, ".info/connected"), s => {
   render();
 });
 
+let startTab = "songs";
+try { if (localStorage.getItem("piano.tab") === "lists") startTab = "lists"; } catch (e) {}
+show(startTab);
+
 onAuthStateChanged(auth, (u) => {
   unsubs.forEach(f => f()); unsubs = [];
   if (tapUnsub) { tapUnsub(); tapUnsub = null; }
-  tap = null; denied = false; state = null; heartbeat = null; songs = {};
+  tap = null; denied = false; state = null; heartbeat = null; songs = {}; playlists = {};
   $("signin-box").hidden = !!u; $("app").hidden = !u; $("bar").hidden = !u;
   if (!u) { renderSongs(); return; }
   const no = () => { denied = true; render(); };
@@ -433,6 +775,12 @@ onAuthStateChanged(auth, (u) => {
     onValue(ref(db, "piano/state"), s => { state = s.val(); render(); }, no),
     onValue(ref(db, "piano/hub"),   s => { heartbeat = s.val(); render(); }, no),
     onValue(ref(db, "piano/songs"), s => { songs = s.val() || {}; renderSongs(); }, no),
+    onValue(ref(db, "piano/playlists"), s => {
+      playlists = s.val() || {};
+      renderLists();
+      if (view === "list") renderPlaylist();
+      render();
+    }, no),
   );
 });
 </script>
