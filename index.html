@@ -66,7 +66,16 @@
             height: var(--search-h); box-sizing: border-box; }
   #q { width: 100%; height: 40px; box-sizing: border-box; border: 0; border-radius: 10px; background: var(--fill); color: var(--text);
        font: 17px var(--font); padding: 0 12px; outline: none; -webkit-appearance: none; appearance: none; }
+  #q { padding: 0 40px 0 36px; }
   #q::placeholder { color: var(--text-2); }
+  #q::-webkit-search-cancel-button, #q::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
+  .field { position: relative; }
+  .field svg { position: absolute; left: 11px; top: 11px; width: 18px; height: 18px; stroke: var(--text-2); fill: none; stroke-width: 2.2; pointer-events: none; }
+  #clear { position: absolute; right: 4px; top: 4px; width: 32px; height: 32px; border: 0; background: none; padding: 0;
+           display: grid; place-items: center; }
+  #clear::before { content: ""; width: 18px; height: 18px; border-radius: 50%; background: var(--text-3); }
+  #clear::after { content: "×"; position: absolute; color: var(--bg); font: 700 15px/1 var(--font); }
+  #nomatch button { border: 0; background: none; color: var(--accent); padding: 0; font: inherit; }
 
   /* list */
   ul { list-style: none; margin: 0; padding: 0; }
@@ -109,7 +118,13 @@
   #dot.on { background: var(--ok); } #dot.off { background: var(--bad); }
   #barMark .eq, #barMark .spin { width: 18px; height: 18px; }
   #barTxt { flex: 1; min-width: 0; }
-  #line { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #lineRow { display: flex; align-items: baseline; gap: 8px; }
+  #line { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #time { flex: none; color: var(--text-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+  #time:empty { display: none; }
+  /* progress: a thin line along the top edge of the bar */
+  #prog { position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--sep); }
+  #prog i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 1s linear; }
   #sub { color: var(--text-2); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #sub.warn, #sub.fail { white-space: normal; }   /* problems may take a few lines */
   #sub:empty { display: none; }
@@ -137,18 +152,23 @@
     <button id="signin">Sign in with Google</button>
   </div>
   <div id="app" hidden>
-    <div class="search"><input id="q" type="search" placeholder="Search songs, composers, pianists"
-         autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></div>
+    <div class="search"><div class="field">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20 20" stroke-linecap="round"/></svg>
+      <input id="q" type="search" placeholder="Search songs, composers, pianists" aria-label="Search"
+         autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+      <button id="clear" type="button" aria-label="Clear search" hidden></button>
+    </div></div>
     <p id="empty" hidden>No songs on the hub yet.</p>
-    <p id="nomatch" hidden>No matches.</p>
+    <p id="nomatch" hidden>No matches. <button id="clear2" type="button">Clear search</button></p>
     <ul id="songs"></ul>
     <button id="signout">Sign out</button>
   </div>
 </main>
 <div id="bar" hidden>
+  <div id="prog" hidden><i></i></div>
   <div class="in">
     <div id="barMark"><span id="dot"></span></div>
-    <div id="barTxt"><div id="line">…</div><div id="sub"></div></div>
+    <div id="barTxt"><div id="lineRow"><span id="line">…</span><span id="time"></span></div><div id="sub"></div></div>
     <button id="stop" aria-label="Stop"></button>
   </div>
 </div>
@@ -204,6 +224,7 @@ const fold = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").r
   .replace(/ł/g, "l").replace(/æ/g, "ae").toLowerCase();
 const surname = (c) => (c || "").replace(/\(.*?\)/g, "").trim().split(/\s+/).pop() || "";
 
+const mmss = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 const hubUp = () => heartbeat != null && Date.now() + offset - heartbeat < HUB_STALE_MS;
 const phoneOffline = () => connected === false && everConnected;
 const answered = () => !!(tap && tap.rec && tap.rec.result);
@@ -274,6 +295,18 @@ function render() {
     subClass = ""; mark = starting ? "spin" : "eq";
   }
   if (f && !denied) { sub = f; subClass = "fail"; }
+  // run time: the hub sends each song's length (len, s) and, while playing, when it started (since, server ms)
+  let time = "", frac = null;
+  const len = current && songs[current] && songs[current].len;
+  if (current && len && !starting) {
+    if (s.status === "playing" && s.song === current && s.since) {
+      const el = Math.min(len, Math.max(0, (Date.now() + offset - s.since) / 1000));
+      time = `${mmss(el)} / ${mmss(len)}`; frac = el / len;
+    } else time = mmss(len);
+  }
+  $("time").textContent = time;
+  $("prog").hidden = frac == null;
+  if (frac != null) $("prog").firstChild.style.width = (frac * 100).toFixed(2) + "%";
   setBarMark(mark, dot);
   $("line").textContent = line;
   $("sub").textContent = sub;
@@ -312,9 +345,8 @@ function renderSongs() {
       const b = document.createElement("button"); b.className = "row";
       const txt = document.createElement("span"); txt.className = "txt";
       const t = document.createElement("span"); t.className = "t";
-      const [main, extra] = splitTitle(s.title || id);
+      const [main] = splitTitle(s.title || id);   // work/movement part left out until the hub sends them as fields
       t.textContent = main;
-      if (extra) { const x = document.createElement("span"); x.className = "x"; x.textContent = " · " + extra; t.append(x); }
       txt.append(t);
       if (s.performer) { const e = document.createElement("span"); e.className = "s"; e.textContent = s.performer; txt.append(e); }
       b.append(txt);
@@ -340,9 +372,27 @@ function filter() {
   }
   close();
   $("nomatch").hidden = !(words.length && shown === 0);
+  $("clear").hidden = !$("q").value;
 }
-$("q").addEventListener("input", filter);
-$("q").addEventListener("keydown", e => { if (e.key === "Enter") e.target.blur(); });
+// Search behaviour: × clears (keyboard stays open), Search/Enter closes the keyboard, Escape clears,
+// scrolling the list closes the keyboard, and each new query starts at the top of the results.
+function clearSearch(keepFocus) {
+  $("q").value = ""; filter();
+  if (keepFocus) $("q").focus(); else $("q").blur();
+}
+$("q").addEventListener("input", () => {
+  filter();
+  const top = $("app").offsetTop;                       // keep the search bar pinned, results from the top
+  if (window.scrollY > top) window.scrollTo(0, top);
+});
+$("q").addEventListener("keydown", e => {
+  if (e.key === "Enter") e.target.blur();
+  if (e.key === "Escape") clearSearch(false);
+});
+$("clear").addEventListener("pointerdown", e => e.preventDefault());   // don't steal focus from the field
+$("clear").onclick = () => clearSearch(true);
+$("clear2").onclick = () => clearSearch(false);
+$("songs").addEventListener("touchstart", () => { if (document.activeElement === $("q")) $("q").blur(); }, { passive: true });
 
 function send(action, song) {
   const u = auth.currentUser;
